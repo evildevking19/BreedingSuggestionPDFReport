@@ -1,7 +1,10 @@
 import os, math
 from collections import defaultdict
 from PyQt5.QtWidgets import QMessageBox
-
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -34,6 +37,23 @@ def getGoogleSheetService():
     except HttpError as err:
         print(err)
         return None
+    
+def getGoogleDriver():
+    chrome_options = webdriver.ChromeOptions()
+    # chrome_options.add_argument("--window-size=1920,1080")
+    # chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--log-level=3")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    driver.execute_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source":
+            "const newProto = navigator.__proto__;"
+            "delete newProto.webdriver;"
+            "navigator.__proto__ = newProto;"
+    })
+    return driver
     
 def load_spreadsheet_data(wsheetId, msheetId):
     worksheet = getGoogleSheetService().spreadsheets()
@@ -77,23 +97,24 @@ def getProjectPath():
 
 def getTextValue(list, index):
     try:
-        return list[index].select_one("div.block-name").get("title")
+        return list[index].find_element(By.CSS_SELECTOR, "div.block-name").get_attribute("title")
     except:
         return ""
 
-def getPedigreeDataFromTable(table):
+def getPedigreeDataFromTable(table, version):
     result = []
     ## Extract the values will be input in spreadsheet ##
     ids = ["MMM", "MMMM", "MM", "MMF", "MMFM", "M", "MFM", "MFMM", "MF", "MFF", "MFFM", "FMM", "FMMM", "FM", "FMF", "FMFM", "F", "FFM", "FFMM", "FF", "FFF", "FFFM"]
     for id in ids:
-        td_elem = table.select_one(f"td#{id}")
-        next_td_elem = table.select_one(f"td#{id} + td")
-        if next_td_elem.get("class") == "pedigree-cell-highlight":
-            label = td_elem.select_one("div.block-name").get("title").title()
-            label += "*"
+        td_elem = table.find_element(By.CSS_SELECTOR, f"td#{id}")
+        next_td_elem = table.find_element(By.CSS_SELECTOR, f"td#{id} + td")
+        if next_td_elem.get_attribute("class") == "pedigree-cell-highlight":
+            label = td_elem.find_element(By.CSS_SELECTOR, "div.block-name").get_attribute("title").title()
+            if version == 2:
+                label += "*"
             result.append(label)
         else:
-            result.append(td_elem.select_one("div.block-name").get("title").title())
+            result.append(td_elem.find_element(By.CSS_SELECTOR, "div.block-name").get_attribute("title").title())
 
     return result
 

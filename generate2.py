@@ -1,13 +1,14 @@
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.common.by import By
 from fpdf import FPDF, XPos, YPos, Align
-import math
-import requests
-from requests.adapters import HTTPAdapter
-from bs4 import BeautifulSoup
+import math, time
 from constants import *
 
 class CustomPDF(FPDF):
-    def __init__(self, orientation, unit, format):
+    def __init__(self, orientation, unit, format, broodmare):
         super().__init__(orientation, unit, format)
+        self.isBroodmare = broodmare
 
     def header(self):
         if self.page_no() != 1:
@@ -18,7 +19,7 @@ class CustomPDF(FPDF):
             self.set_font('Times', '', 15)
             self.set_text_color(128, 128, 128)
             self.cell(750)
-            self.cell(0, 30, 'Stallion Suggestions Report', new_x=XPos.RIGHT, new_y=YPos.TOP)
+            self.cell(0, 30, f'{"Broodmare" if self.isBroodmare else "Stallion"} Suggestions Report', new_x=XPos.RIGHT, new_y=YPos.TOP)
 
             # # Line break
             self.ln(20)
@@ -38,61 +39,70 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     ################# Preparing PDF Data #####################
     #################                    #####################
     ##########################################################
-    s = requests.Session()
-    adapter = HTTPAdapter(max_retries=3)
-    s.mount('http://', adapter)
-    s.mount('https://', adapter)
+    driver = getGoogleDriver()
+    driver.get("https://beta.allbreedpedigree.com/login")
+
+    try:
+        driver.find_element(By.CSS_SELECTOR, "div.modal-footer > button").click()
+    except:
+        print("No modal")
     
-    resp = s.get("https://beta.allbreedpedigree.com/login")
-    soup = BeautifulSoup(resp.content, 'html.parser')
-    meta_tags = soup.find_all('meta')
-    token = ""
-    for tag in meta_tags:
-        if 'name' in tag.attrs:
-            name = tag.attrs['name']
-            if name == "csrf-token":
-                token = tag.attrs['content']
-                break
-    s.post("https://beta.allbreedpedigree.com/login", data={ "_token": token, "email": "brittany.holy@gmail.com", "password": "7f2uwvm5e4sD5PH" })
-    resp = s.get(f"https://beta.allbreedpedigree.com/search?query_type=check&search_bar=horse&g=5&inbred=Standard&breed=&query={wsheetName}")
-    soup = BeautifulSoup(resp.content, 'html.parser')
+    email_elem = driver.find_element(By.CSS_SELECTOR, "input#id-field-email")
+    email_elem.click()
+    email_elem.send_keys("brittany.holy@gmail.com")
+
+    password_elem = driver.find_element(By.CSS_SELECTOR, "input#id-field-password")
+    password_elem.click()
+    password_elem.send_keys("7f2uwvm5e4sD5PH")
+
+    button_elem = driver.find_element(By.CSS_SELECTOR, "div.card-footer button")
+    button_elem.click()
+    time.sleep(1)
+
+    WebDriverWait(driver, 10).until(ec.presence_of_element_located((By.CSS_SELECTOR, "input#header-search-input")))
+
+    input_horse_elem = driver.find_element(By.CSS_SELECTOR, "input#header-search-input")
+    input_horse_elem.click()
+    input_horse_elem.send_keys(wsheetName)
+
+    driver.find_element(By.CSS_SELECTOR, "button#header-search-button").click()
+    time.sleep(1)
+    WebDriverWait(driver, 30).until(lambda browser: browser.execute_script("return document.readyState") == "complete")
     pedigree_dict = dict()
     try:
-        pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-        pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-        table = soup.select_one("table.pedigree-table")
-        pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+        pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+        pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+        pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+        pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 3)
     except:
         try:
-            table = soup.select_one("div.layout-table-wrapper table")
-            tds = table.select("td:nth-child(1)")
+            pedigree_table = driver.find_element(By.CSS_SELECTOR, "div.layout-table-wrapper table")
+            tds = pedigree_table.find_elements(By.CSS_SELECTOR, "td:nth-child(1)")
             txt_vals = []
             links = []
             for td in tds:
                 txt_vals.append(td.text.upper())
-                links.append(td.select_one("a").get("href"))
+                links.append(td.find_element(By.TAG_NAME, "a").get_attribute("href"))
             indexes = [i for i, x in enumerate(txt_vals) if x.lower() == wsheetName.lower()]
             if len(indexes) == 1:
-                resp = s.get(links[0])
-                soup = BeautifulSoup(resp.content, 'html.parser')
-                pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-                pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-                table = soup.select_one("table.pedigree-table")
-                pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+                driver.get(links[0])
+                pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+                pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+                pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+                pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 3)
             else:
                 try:
-                    resp = s.get(f"https://beta.allbreedpedigree.com/search?match=exact&breed=&sex=&query={wsheetName}")
-                    soup = BeautifulSoup(resp.content, 'html.parser')
-                    pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-                    pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-                    table = soup.select_one("table.pedigree-table")
-                    pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+                    driver.get(f"https://beta.allbreedpedigree.com/search?match=exact&breed=&sex=&query={wsheetName}")
+                    pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+                    pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+                    pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+                    pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 3)
                 except:
                     return {"status": MSG_ERROR, "msg": "Not found your horse pedigree data from allbreedpedigree.com."}
         except:
             return {"status": MSG_ERROR, "msg": "Not found your horse pedigree data from allbreedpedigree.com."}
-        
-    print("-----------")
+
+    if driver != None: driver.quit()
 
     sire_name = pedigree_dict["pedigree"][5]
     damssire_name = pedigree_dict["pedigree"][13]
@@ -100,7 +110,7 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     damssire3_name = pedigree_dict["pedigree"][21]
 
     worksheet = getGoogleSheetService().spreadsheets()
-    base_data = worksheet.values().get(spreadsheetId=wsheetId, range=f"{wsheetName}!B4:C").execute().get('values')
+    base_data = worksheet.values().get(spreadsheetId=wsheetId, range=f"{wsheetName}!B4:D").execute().get('values')
     oned_data = worksheet.values().get(spreadsheetId=msheetId, range="1d crosses!B2:W").execute().get('values')
     tier1_basedata = []
     tier2_basedata = []
@@ -187,6 +197,7 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     v_sum = get2DigitsStringValue(float(v_sire) + float(v_damssire) + float(v_damssire2) + float(v_damssire3))
 
     pivot_data = worksheet.values().get(spreadsheetId=wsheetId, range=f"{wsheetName}!U4:AD").execute().get('values')
+    isBroodmareData = False
     tier_suggestions = dict()
     tier_label = ""
     for pd in pivot_data:
@@ -196,6 +207,8 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
             if tier_label != pd[0].strip():
                 tier_label = pd[0]
             tier_suggestions[tier_label] = []
+        if pd[9].strip() == "N/A":
+            isBroodmareData = True
         tier_suggestions[tier_label].append([pd[1], pd[2], pd[6], pd[7], pd[8], pd[9]])
 
     tier1_sugs = []
@@ -251,20 +264,36 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     for bd in base_data:
         if len(bd) == 0: break
         for sug in tier1_left_data:
-            if bd[1].lower() == sug[0].lower():
-                tier1_basedata.append(bd)
+            if isBroodmareData:
+                if bd[2].lower() == sug[0].lower():
+                    tier1_basedata.append([bd[0], bd[2]])
+            else:
+                if bd[1].lower() == sug[0].lower():
+                    tier1_basedata.append([bd[0], bd[1]])
         for sug in tier3_left_data:
-            if bd[1].lower() == sug[0].lower():
-                tier3_basedata.append(bd)
+            if isBroodmareData:
+                if bd[2].lower() == sug[0].lower():
+                    tier3_basedata.append([bd[0], bd[2]])
+            else:
+                if bd[1].lower() == sug[0].lower():
+                    tier3_basedata.append([bd[0], bd[1]])
         for sug in tier4_left_data:
-            if bd[1].lower() == sug[0].lower():
-                tier4_basedata.append(bd)
+            if isBroodmareData:
+                if bd[2].lower() == sug[0].lower():
+                    tier4_basedata.append([bd[0], bd[2]])
+            else:
+                if bd[1].lower() == sug[0].lower():
+                    tier4_basedata.append([bd[0], bd[1]])
                 
     for bd in oned_data:
         if len(bd) < 2: continue
         for sug in tier2_left_data:
-            if bd[1].lower() == sug[0].lower():
-                tier2_basedata.append([bd[0], bd[1]])
+            if isBroodmareData:
+                if bd[2].lower() == sug[0].lower():
+                    tier2_basedata.append([bd[0], bd[2]])
+            else:
+                if bd[1].lower() == sug[0].lower():
+                    tier2_basedata.append([bd[0], bd[1]])
                 
     # Calculate Sequencies #
     tier1_metadata = {"events": [], "top_placings": [], "progeny": []}
@@ -321,7 +350,7 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     ###################                        ###################
     ##############################################################
     lmargin = 20
-    pdf = CustomPDF(orientation='L', unit='pt', format=(600, 1000))
+    pdf = CustomPDF(orientation='L', unit='pt', format=(600, 1000), broodmare=isBroodmareData)
     pdf.alias_nb_pages()
 
     ################# page 1 #################
@@ -332,7 +361,7 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     pdf.set_font('Times', '', 25)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(350)
-    pdf.multi_cell(w=150, h=30, text="Stallion Suggestions", align=Align.C, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(w=150, h=30, text=f"{'Broodmare' if isBroodmareData else 'Stallion'} Suggestions", align=Align.C, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.ln(280)
     pdf.set_font_size(25)
@@ -1339,4 +1368,4 @@ def create_pdf(wsheetId=None, wsheetName=None, msheetId=None, genType=None):
     pdf.output(f"{wsheetName}.pdf")
     return {"status": MSG_SUCCESS, "msg": "Success"}
     
-# create_pdf(wsheetId="1CXDvIu3ojjSxNTDJayIbz844vLzrjR-t6BXEsHqrarw", wsheetName="Rhythm Of The Sting", msheetId="1g5kX6F34q2HFn4aqfXb5tkjBM_qTSy4fHUakxz6qJj0", genType=0)
+create_pdf(wsheetId="1Jt7xecTvwcbV38RKouwl1s8-yaCRVhV17Q1UzjzJyxs", wsheetName="TM Game Changer", msheetId="17L8alhQbhdFywT_9katsgrZ4uXGfa2UMuAXkHOMfjGA", genType=0)

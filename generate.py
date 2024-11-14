@@ -1,10 +1,12 @@
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from fpdf import FPDF, XPos, YPos, Align
-import requests
-from requests.adapters import HTTPAdapter
-from bs4 import BeautifulSoup
 from constants import *
 import time, math, re
 
+driver = None
 cur_dir = getProjectPath()
 
 class CustomPDF(FPDF):
@@ -41,71 +43,81 @@ def create_pdf(wsheetId=None, sheetName=None, msheetId=None, genType=None):
     ################# Preparing PDF Data #####################
     #################                    #####################
     ##########################################################
-    s = requests.Session()
-    adapter = HTTPAdapter(max_retries=3)
-    s.mount('http://', adapter)
-    s.mount('https://', adapter)
-
-    resp = s.get("https://beta.allbreedpedigree.com/login")
-    soup = BeautifulSoup(resp.content, 'html.parser')
-    meta_tags = soup.find_all('meta')
-    token = ""
-    for tag in meta_tags:
-        if 'name' in tag.attrs:
-            name = tag.attrs['name']
-            if name == "csrf-token":
-                token = tag.attrs['content']
-                break
-    s.post("https://beta.allbreedpedigree.com/login", data={ "_token": token, "email": "brittany.holy@gmail.com", "password": "7f2uwvm5e4sD5PH" })
-    resp = s.get(f"https://beta.allbreedpedigree.com/search?query_type=check&search_bar=horse&g=5&inbred=Standard&breed=&query={sheetName}")
-    soup = BeautifulSoup(resp.content, 'html.parser')
+    
+    driver = getGoogleDriver()
+    driver.get("https://beta.allbreedpedigree.com/login")
+    WebDriverWait(driver, 30).until(lambda browser: browser.execute_script("return document.readyState") == "complete")
     try:
-        linebred_link = soup.select_one("div#report-menu li:nth-child(4) a").get("href")
+        modal_button = driver.find_element(By.CSS_SELECTOR, "div.modal-footer button")
+        modal_button.click()
     except:
-        return {"status": MSG_ERROR, "msg": "Not found exactly matched horse pedigree data with given name from allbreedpedigree.com."}
+        print("No modal")
+    
+    time.sleep(0.5)
+    email_elem = driver.find_element(By.CSS_SELECTOR, "input#id-field-email")
+    email_elem.click()
+    email_elem.send_keys("brittany.holy@gmail.com")
+
+    password_elem = driver.find_element(By.CSS_SELECTOR, "input#id-field-password")
+    password_elem.click()
+    password_elem.send_keys("7f2uwvm5e4sD5PH")
+
+    button_elem = driver.find_element(By.CSS_SELECTOR, "div.card-footer button")
+    button_elem.click()
+    time.sleep(1)
+
+    WebDriverWait(driver, 10).until(ec.presence_of_element_located((By.CSS_SELECTOR, "input#header-search-input")))
+
+    input_horse_elem = driver.find_element(By.CSS_SELECTOR, "input#header-search-input")
+    input_horse_elem.click()
+    input_horse_elem.send_keys(sheetName)
+
+    driver.find_element(By.CSS_SELECTOR, "button#header-search-button").click()
+    time.sleep(1)
+    WebDriverWait(driver, 30).until(lambda browser: browser.execute_script("return document.readyState") == "complete")
     pedigree_dict = dict()
     try:
-        pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-        pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-        table = soup.select_one("table.pedigree-table")
-        pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+        pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+        pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+        pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+        pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 2)
     except:
         try:
-            table = soup.select_one("div.layout-table-wrapper table")
-            tds = table.select("td:nth-child(1)")
+            pedigree_table = driver.find_element(By.CSS_SELECTOR, "div.layout-table-wrapper table")
+            tds = pedigree_table.find_elements(By.CSS_SELECTOR, "td:nth-child(1)")
             txt_vals = []
             links = []
             for td in tds:
                 txt_vals.append(td.text.upper())
-                links.append(td.select_one("a").get("href"))
+                links.append(td.find_element(By.TAG_NAME, "a").get_attribute("href"))
             indexes = [i for i, x in enumerate(txt_vals) if x.lower() == sheetName.lower()]
             if len(indexes) == 1:
-                resp = s.get(links[0])
-                soup = BeautifulSoup(resp.content, 'html.parser')
-                pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-                pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-                table = soup.select_one("table.pedigree-table")
-                pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+                driver.get(links[0])
+                pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+                pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+                pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+                pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 2)
             else:
                 try:
-                    resp = s.get(f"https://beta.allbreedpedigree.com/search?match=exact&breed=&sex=&query={sheetName}")
-                    soup = BeautifulSoup(resp.content, 'html.parser')
-                    pedigree_dict["sex"] = soup.select_one("span#pedigree-animal-info span[title='Sex']").text
-                    pedigree_dict["birth"] = soup.select_one("span#pedigree-animal-info span[title='Date of Birth']").text
-                    table = soup.select_one("table.pedigree-table")
-                    pedigree_dict["pedigree"] = getPedigreeDataFromTable(table)
+                    driver.get(f"https://beta.allbreedpedigree.com/search?match=exact&breed=&sex=&query={sheetName}")
+                    pedigree_dict["sex"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Sex']").text
+                    pedigree_dict["birth"] = driver.find_element(By.CSS_SELECTOR, "span#pedigree-animal-info span[title='Date of Birth']").text
+                    pedigree_table = driver.find_element(By.CSS_SELECTOR, "table.pedigree-table")
+                    pedigree_dict["pedigree"] = getPedigreeDataFromTable(pedigree_table, 2)
                 except:
                     return {"status": MSG_ERROR, "msg": "Not found your horse pedigree data from allbreedpedigree.com."}
         except:
             return {"status": MSG_ERROR, "msg": "Not found your horse pedigree data from allbreedpedigree.com."}
     
-    resp = s.get(f"{linebred_link}?crosses=2&filter=duplicates&gens=5&influence=0")
-    soup = BeautifulSoup(resp.content, 'html.parser')
+    linebred_link = driver.find_element(By.CSS_SELECTOR, "div#report-menu li:nth-child(4) a").get_attribute("href")
+    driver.get(f"{linebred_link}?crosses=2&filter=duplicates&gens=5&influence=0")
     try:
-        coi_val = soup.select_one("blockquote ul li:nth-child(1) span.text-success strong").text
+        coi_val = driver.find_element(By.CSS_SELECTOR, "blockquote ul li:nth-child(1) span.text-success strong").text
         coi_val = get2DigitsStringValue(float(coi_val.replace("%",""))) + "%"
     except:
         coi_val = "0.00%"
+    
+    if driver != None: driver.quit()
 
     sire_name = pedigree_dict["pedigree"][5]
     damssire_name = pedigree_dict["pedigree"][13]
@@ -1580,7 +1592,7 @@ def create_pdf(wsheetId=None, sheetName=None, msheetId=None, genType=None):
 
                 pdf.set_left_margin(30)
 
-    if len(tier1_sugs) == 0:
+    if not isBroodmareData and len(tier1_sugs) == 0:
         ################# page (Equi-Source Score as a dam) ###################
         damssire_name = pedigree_dict["pedigree"][5]
         damssire2_name = pedigree_dict["pedigree"][13]
@@ -2360,4 +2372,4 @@ def create_pdf(wsheetId=None, sheetName=None, msheetId=None, genType=None):
     pdf.output(f"{sheetName}.pdf")
     return {"status": MSG_SUCCESS, "msg": "Success"}
     
-create_pdf(wsheetId="18hcSiVWauAaZp8OnAzDW38lKlmisZZl5cM7zC4d0zrk", sheetName="Half Secret", msheetId="1g5kX6F34q2HFn4aqfXb5tkjBM_qTSy4fHUakxz6qJj0", genType=0)
+# create_pdf(wsheetId="1Hs-eUFbea0LaQ7KSnnb-fqtQMehWm8jwHhwLDeaU2p8", sheetName="ANY GUY OF MINE", msheetId="17L8alhQbhdFywT_9katsgrZ4uXGfa2UMuAXkHOMfjGA", genType=0)

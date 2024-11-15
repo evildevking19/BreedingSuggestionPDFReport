@@ -20,23 +20,23 @@ def getGoogleSheetService():
     # If modifying these scopes, delete the file token.json.
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
     
-    credential = None
-    if os.path.exists('assets/utils/token.json'):
-        credential = Credentials.from_authorized_user_file('assets/utils/token.json', SCOPES)
-    if not credential or not credential.valid:
-        if credential and credential.expired and credential.refresh_token:
-            credential.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('assets/utils/credentials.json', SCOPES)
-            credential = flow.run_local_server(port=0)
-        with open('assets/utils/token.json', 'w') as token:
-            token.write(credential.to_json())
-    try:
-        service = build("sheets", "v4", credentials=credential)
-        return service
-    except HttpError as err:
-        print(err)
-        return None
+    # credential = None
+    # if os.path.exists('assets/utils/token.json'):
+    #     credential = Credentials.from_authorized_user_file('assets/utils/token.json', SCOPES)
+    # if not credential or not credential.valid:
+    #     if credential and credential.expired and credential.refresh_token:
+    #         credential.refresh(Request())
+    #     else:
+    #         flow = InstalledAppFlow.from_client_secrets_file('assets/utils/credentials.json', SCOPES)
+    #         credential = flow.run_local_server(port=0)
+    #     with open('assets/utils/token.json', 'w') as token:
+    #         token.write(credential.to_json())
+    # try:
+    #     service = build("sheets", "v4", credentials=credential)
+    #     return service
+    # except HttpError as err:
+    #     print(err)
+    #     return None
     
 def getGoogleDriver():
     chrome_options = webdriver.ChromeOptions()
